@@ -1,0 +1,122 @@
+#include <ESP8266WiFi.h>
+#include <WiFiManager.h>
+#include <PubSubClient.h>
+#include <ArduinoJson.h>
+#include <Adafruit_NeoPixel.h>
+#include <ArduinoOTA.h>
+
+// ----- LED CONFIG -----
+#define LED_PIN 2
+#define NUM_LEDS 25  // Change to match your prototype
+
+Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
+
+// ----- HARD-CODED ID PREFIX -----
+const char* DEVICE_PREFIX = "josh";
+
+// ----- UNIQUE DEVICE ID (chip ID last 4 hex) -----
+String getDeviceID() {
+  uint32_t chipId = ESP.getChipId(); // 24-bit chip id
+  char idStr[9];
+  snprintf(idStr, sizeof(idStr), "%s%04X", DEVICE_PREFIX, chipId & 0xFFFF);
+  return String(idStr);
+}
+
+// ----- MQTT CONFIG -----
+String deviceID;
+String mqtt_topic;
+
+const char* mqtt_server = "test.mosquitto.org";
+const int mqtt_port = 1883;
+
+// ----- CLIENTS -----
+WiFiClient espClient;
+PubSubClient client(espClient);
+
+// ----- STATE -----
+unsigned long lastBlink = 0;
+bool blinkState = false;
+bool mqttConnected = false;
+
+// ----- FUNCTIONS -----
+void blinkFirstLEDRed() {
+  unsigned long now = millis();
+  if (now - lastBlink > 500) {
+    blinkState = !blinkState;
+    strip.setPixelColor(0, blinkState ? strip.Color(255, 0, 0) : strip.Color(0, 0, 0));
+    strip.show();
+    lastBlink = now;
+  }
+}
+
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+  StaticJsonDocument<512> doc; // Enough for ~15 LEDs per message
+  DeserializationError error = deserializeJson(doc, payload, length);
+  if (error) return;
+
+  if (doc.containsKey("leds")) {
+    JsonArray leds = doc["leds"].as<JsonArray>();
+
+    for (JsonObject led : leds) {
+      if (!led.containsKey("i") || !led.containsKey("c")) continue;
+
+      int index = led["i"];
+      if (index < 0 || index >= NUM_LEDS) continue;
+
+      String hex = led["c"];
+      uint8_t brightness = led.containsKey("b") ? led["b"] : 255;
+
+      long color = strtol(hex.substring(1).c_str(), NULL, 16);
+      uint8_t r = (color >> 16) & 0xFF;
+      uint8_t g = (color >> 8) & 0xFF;
+      uint8_t b = color & 0xFF;
+
+      strip.setBrightness(brightness);
+      strip.setPixelColor(index, strip.Color(r, g, b));
+    }
+    strip.show();
+  }
+}
+
+void reconnectMQTT() {
+  while (!client.connected()) {
+    if (client.connect(deviceID.c_str())) {
+      client.subscribe(mqtt_topic.c_str());
+      mqttConnected = true;
+    } else {
+      mqttConnected = false;
+      delay(2000);
+    }
+  }
+}
+
+void setup() {
+  strip.begin();
+  strip.show();
+
+  deviceID = getDeviceID();
+  mqtt_topic = "lights/" + deviceID + "/control";
+
+  WiFiManager wifiManager;
+  wifiManager.autoConnect("ESP_Config_AP");
+
+  client.setServer(mqtt_server, mqtt_port);
+  client.setCallback(mqttCallback);
+
+  // OTA Setup with password and unique hostname
+  ArduinoOTA.setHostname(deviceID.c_str());
+  ArduinoOTA.setPassword("josh");
+  ArduinoOTA.begin();
+}
+
+void loop() {
+  ArduinoOTA.handle();
+
+  if (WiFi.status() != WL_CONNECTED) {
+    mqttConnected = false;
+    blinkFirstLEDRed();
+    return;
+  }
+  if (!client.connected()) reconnectMQTT();
+  client.loop();
+}
