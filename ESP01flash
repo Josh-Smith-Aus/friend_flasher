@@ -11,7 +11,7 @@
 
 Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
 
-// ----- HARD-CODED ID PREFIX -----
+// ----- HARD-CODED PREFIX -----
 const char* DEVICE_PREFIX = "josh";
 
 // ----- UNIQUE DEVICE ID (chip ID last 4 hex) -----
@@ -32,11 +32,18 @@ const int mqtt_port = 1883;
 // ----- CLIENTS -----
 WiFiClient espClient;
 PubSubClient client(espClient);
+WiFiManager wifiManager;
 
 // ----- STATE -----
 unsigned long lastBlink = 0;
 bool blinkState = false;
 bool mqttConnected = false;
+unsigned long wifiLostTimestamp = 0;
+unsigned long lastRetryTimestamp = 0;
+const unsigned long TIMEOUT_BEFORE_AP = 120000; // 2 minutes
+const unsigned long RETRY_INTERVAL = 120000;    // 2 minutes
+
+bool inConfigPortal = false;
 
 // ----- FUNCTIONS -----
 void blinkFirstLEDRed() {
@@ -113,10 +120,45 @@ void loop() {
   ArduinoOTA.handle();
 
   if (WiFi.status() != WL_CONNECTED) {
+    if (wifiLostTimestamp == 0) {
+      wifiLostTimestamp = millis();
+    }
+
+    if (!inConfigPortal && (millis() - wifiLostTimestamp > TIMEOUT_BEFORE_AP)) {
+      // Enter config portal
+      inConfigPortal = true;
+      wifiManager.startConfigPortal("ESP_Config_AP");
+      // If startConfigPortal returns, it means connected or timeout happened
+      if (WiFi.status() == WL_CONNECTED) {
+        inConfigPortal = false;
+        wifiLostTimestamp = 0;
+        lastRetryTimestamp = 0;
+      }
+    }
+
+    if (inConfigPortal) {
+      // Periodically try reconnecting using saved creds every RETRY_INTERVAL
+      if (millis() - lastRetryTimestamp > RETRY_INTERVAL) {
+        lastRetryTimestamp = millis();
+        if (wifiManager.autoConnect("ESP_Config_AP")) {
+          // Connected, exit config portal
+          inConfigPortal = false;
+          wifiLostTimestamp = 0;
+          lastRetryTimestamp = 0;
+        }
+      }
+    }
+
     mqttConnected = false;
     blinkFirstLEDRed();
     return;
+  } else {
+    // Connected, reset flags and timers
+    wifiLostTimestamp = 0;
+    lastRetryTimestamp = 0;
+    inConfigPortal = false;
   }
+
   if (!client.connected()) reconnectMQTT();
   client.loop();
 }
