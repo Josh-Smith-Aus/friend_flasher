@@ -97,3 +97,4 @@ This example:
 ### TO DO
 - Get resistor and step up/down boards so signal is passed cleanly to LEDs
 - Make a wiring diagram
+- Switch on and off
