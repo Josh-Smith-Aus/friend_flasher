@@ -2,6 +2,7 @@
 
 This project connects an **ESP8266** to Wi-Fi and an MQTT broker to control a strip of WS2812/NeoPixel LEDs.  
 It supports **JSON-based commands** to change the color and brightness of individual LEDs and includes **over-the-air (OTA) updates** for easy firmware changes.
+It will initially open itself up as a Wi-Fi access point and serve a simple login page showing available Wi-Fi access points and asking for SSID password using the WiFiManager package. Once connected to the local Wi-Fi it will be able to recieve MTQQ messages. If Wi-Fi is lost for 2mins it will revert back to AP mode to reconnect and check saved credentials every 2mins, the first LED will blink red while in this state.
 
 ### Features
 - **Wi-Fi Setup via WiFiManager**  
@@ -95,6 +96,4 @@ This example:
 
 ### TO DO
 - Get resistor and step up/down boards so signal is passed cleanly to LEDs
-
-### Notes
-- ChatGPT page - Breadboard wiring setup
+- Make a wiring diagram
