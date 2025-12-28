@@ -43,6 +43,19 @@ unsigned long lastMqttReconnect = 0;
 const unsigned long TIMEOUT_BEFORE_AP = 120000;  // 2 minutes
 const unsigned long MQTT_RECONNECT_INTERVAL = 5000;  // 5 seconds
 
+// ----- EFFECT STATE -----
+struct Effect {
+  bool active;
+  int ledIndex;  // -1 for all LEDs
+  String type;   // "pulse", "breathe", "rainbow", "none"
+  uint8_t baseR, baseG, baseB;
+  unsigned long lastUpdate;
+  uint16_t speed;  // milliseconds per step
+  uint8_t step;
+};
+
+Effect currentEffect = {false, -1, "none", 0, 0, 0, 0, 20, 0};
+
 // ----- FUNCTIONS -----
 void setStatusLED(uint8_t r, uint8_t g, uint8_t b) {
   // Set the first LED (status indicator)
@@ -61,6 +74,84 @@ void blinkStatusLED(uint8_t r, uint8_t g, uint8_t b) {
   }
 }
 
+void updateEffects() {
+  if (!currentEffect.active) return;
+  
+  unsigned long now = millis();
+  if (now - currentEffect.lastUpdate < currentEffect.speed) return;
+  
+  currentEffect.lastUpdate = now;
+  
+  if (currentEffect.type == "pulse") {
+    // Pulse effect - single LED
+    currentEffect.step = (currentEffect.step + 1) % 256;
+    uint8_t brightness = (sin(currentEffect.step * 0.0245) + 1) * 127.5;  // 0-255
+    
+    uint8_t r = (currentEffect.baseR * brightness) / 255;
+    uint8_t g = (currentEffect.baseG * brightness) / 255;
+    uint8_t b = (currentEffect.baseB * brightness) / 255;
+    
+    strip.setPixelColor(currentEffect.ledIndex, strip.Color(r, g, b));
+    strip.show();
+    
+  } else if (currentEffect.type == "breathe") {
+    // Breathe effect - single LED (slower sine wave)
+    currentEffect.step = (currentEffect.step + 1) % 512;
+    uint8_t brightness = (sin(currentEffect.step * 0.01227) + 1) * 127.5;  // 0-255
+    
+    uint8_t r = (currentEffect.baseR * brightness) / 255;
+    uint8_t g = (currentEffect.baseG * brightness) / 255;
+    uint8_t b = (currentEffect.baseB * brightness) / 255;
+    
+    strip.setPixelColor(currentEffect.ledIndex, strip.Color(r, g, b));
+    strip.show();
+    
+  } else if (currentEffect.type == "rainbow") {
+    // Rainbow effect - all LEDs except status LED
+    currentEffect.step = (currentEffect.step + 1) % 256;
+    
+    for (int i = 1; i < NUM_LEDS; i++) {
+      uint8_t hue = (currentEffect.step + (i * 256 / NUM_LEDS)) % 256;
+      uint32_t color = strip.ColorHSV(hue * 256);
+      strip.setPixelColor(i, color);
+    }
+    strip.show();
+  }
+}
+
+void startEffect(String type, int ledIndex, uint8_t r, uint8_t g, uint8_t b, String speed) {
+  currentEffect.active = true;
+  currentEffect.type = type;
+  currentEffect.ledIndex = ledIndex;
+  currentEffect.baseR = r;
+  currentEffect.baseG = g;
+  currentEffect.baseB = b;
+  currentEffect.step = 0;
+  currentEffect.lastUpdate = millis();
+  
+  // Set speed based on parameter
+  if (speed == "slow") {
+    currentEffect.speed = 40;  // Slower
+  } else if (speed == "fast") {
+    currentEffect.speed = 10;  // Faster
+  } else {
+    currentEffect.speed = 20;  // Default medium
+  }
+  
+  Serial.print("Started effect: ");
+  Serial.print(type);
+  Serial.print(" on LED ");
+  Serial.print(ledIndex);
+  Serial.print(" at speed ");
+  Serial.println(speed);
+}
+
+void stopEffect() {
+  currentEffect.active = false;
+  currentEffect.type = "none";
+  Serial.println("Stopped effect");
+}
+
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
   StaticJsonDocument<512> doc;
   DeserializationError error = deserializeJson(doc, payload, length);
@@ -69,6 +160,52 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     Serial.println(error.c_str());
     return;
   }
+
+  // Check for effect command
+  if (doc.containsKey("effect")) {
+    String effectType = doc["effect"].as<String>();
+    
+    if (effectType == "none") {
+      stopEffect();
+      return;
+    }
+    
+    if (effectType == "rainbow") {
+      // Rainbow affects all LEDs (except status LED)
+      startEffect("rainbow", -1, 0, 0, 0, doc.containsKey("speed") ? doc["speed"].as<String>() : "medium");
+      return;
+    }
+    
+    // Pulse and breathe require LED index and color
+    if (effectType == "pulse" || effectType == "breathe") {
+      if (!doc.containsKey("led") || !doc.containsKey("color")) {
+        Serial.println("Pulse/Breathe requires 'led' and 'color'");
+        return;
+      }
+      
+      int ledIndex = doc["led"];
+      String hex = doc["color"];
+      String speed = doc.containsKey("speed") ? doc["speed"].as<String>() : "medium";
+      
+      if (ledIndex < 0 || ledIndex >= NUM_LEDS) {
+        Serial.println("Invalid LED index");
+        return;
+      }
+      
+      if (hex.length() >= 7 && hex[0] == '#') {
+        long color = strtol(hex.substring(1).c_str(), NULL, 16);
+        uint8_t r = (color >> 16) & 0xFF;
+        uint8_t g = (color >> 8) & 0xFF;
+        uint8_t b = color & 0xFF;
+        
+        startEffect(effectType, ledIndex, r, g, b, speed);
+      }
+      return;
+    }
+  }
+
+  // Stop any active effects when setting colors directly
+  stopEffect();
 
   // Check for "all" command to set all LEDs at once (skips first LED - status indicator)
   if (doc.containsKey("all")) {
@@ -197,11 +334,15 @@ void setup() {
 }
 
 void loop() {
+  // Update effects if active
+  updateEffects();
+  
   // Check WiFi connection
   if (WiFi.status() != WL_CONNECTED) {
     if (wifiLostTimestamp == 0) {
       wifiLostTimestamp = millis();
       Serial.println("WiFi connection lost");
+      stopEffect();  // Stop effects when WiFi lost
     }
 
     // After timeout, restart to trigger WiFiManager
