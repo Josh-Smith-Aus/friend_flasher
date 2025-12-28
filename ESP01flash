@@ -1,9 +1,9 @@
 #include <ESP8266WiFi.h>
 #include <WiFiManager.h>
+#include <WiFiClientSecure.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include <Adafruit_NeoPixel.h>
-#include <ArduinoOTA.h>
 
 // ----- LED CONFIG -----
 #define LED_PIN 2
@@ -26,11 +26,13 @@ String getDeviceID() {
 String deviceID;
 String mqtt_topic;
 
-const char* mqtt_server = "test.mosquitto.org";
-const int mqtt_port = 1883;
+const char* mqtt_server = "ff0a9749ad4941c9b25358a360502dba.s1.eu.hivemq.cloud";
+const int mqtt_port = 8883;
+const char* mqtt_user = "esp01s";
+const char* mqtt_pass = "EveryonesPenis1";
 
 // ----- CLIENTS -----
-WiFiClient espClient;
+WiFiClientSecure espClient;
 PubSubClient client(espClient);
 
 // ----- STATE -----
@@ -42,11 +44,18 @@ const unsigned long TIMEOUT_BEFORE_AP = 120000;  // 2 minutes
 const unsigned long MQTT_RECONNECT_INTERVAL = 5000;  // 5 seconds
 
 // ----- FUNCTIONS -----
-void blinkFirstLEDRed() {
+void setStatusLED(uint8_t r, uint8_t g, uint8_t b) {
+  // Set the first LED (status indicator)
+  strip.setPixelColor(0, strip.Color(r, g, b));
+  strip.show();
+}
+
+void blinkStatusLED(uint8_t r, uint8_t g, uint8_t b) {
+  // Blink the status LED
   unsigned long now = millis();
   if (now - lastBlink > 500) {
     blinkState = !blinkState;
-    strip.setPixelColor(0, blinkState ? strip.Color(255, 0, 0) : strip.Color(0, 0, 0));
+    strip.setPixelColor(0, blinkState ? strip.Color(r, g, b) : strip.Color(0, 0, 0));
     strip.show();
     lastBlink = now;
   }
@@ -61,6 +70,28 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     return;
   }
 
+  // Check for "all" command to set all LEDs at once (skips first LED - status indicator)
+  if (doc.containsKey("all")) {
+    String hex = doc["all"];
+    uint8_t brightness = doc.containsKey("b") ? doc["b"] : 255;
+
+    // Validate hex format
+    if (hex.length() >= 7 && hex[0] == '#') {
+      long color = strtol(hex.substring(1).c_str(), NULL, 16);
+      uint8_t r = ((color >> 16) & 0xFF) * brightness / 255;
+      uint8_t g = ((color >> 8) & 0xFF) * brightness / 255;
+      uint8_t b = (color & 0xFF) * brightness / 255;
+
+      // Start from index 1 to skip the status LED
+      for (int i = 1; i < NUM_LEDS; i++) {
+        strip.setPixelColor(i, strip.Color(r, g, b));
+      }
+      strip.show();
+    }
+    return;
+  }
+
+  // Individual LED control
   if (doc.containsKey("leds")) {
     JsonArray leds = doc["leds"].as<JsonArray>();
 
@@ -100,11 +131,15 @@ void reconnectMQTT() {
   
   lastMqttReconnect = millis();
   
-  if (client.connect(deviceID.c_str())) {
+  if (client.connect(deviceID.c_str(), mqtt_user, mqtt_pass)) {
     Serial.println("MQTT connected");
     client.subscribe(mqtt_topic.c_str());
+    client.subscribe("lights/all/control");
     Serial.print("Subscribed to: ");
     Serial.println(mqtt_topic);
+    
+    // Set status LED to green when connected
+    setStatusLED(0, 255, 0);
   } else {
     Serial.print("MQTT connection failed, rc=");
     Serial.println(client.state());
@@ -112,6 +147,7 @@ void reconnectMQTT() {
 }
 
 void setup() {
+  espClient.setInsecure();  // Disable cert validation (OK for HiveMQ hobby use)
   Serial.begin(115200);
   delay(1000);
 
@@ -122,6 +158,9 @@ void setup() {
   strip.begin();
   strip.clear();
   strip.show();
+  
+  // Set status LED to blue during boot
+  setStatusLED(0, 0, 255);
 
   deviceID = getDeviceID();
   mqtt_topic = "lights/" + deviceID + "/control";
@@ -144,51 +183,20 @@ void setup() {
   Serial.println("WiFi connected");
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
+  
+  // Set status LED to cyan when WiFi connected
+  setStatusLED(0, 255, 255);
 
   // MQTT setup
   client.setServer(mqtt_server, mqtt_port);
+  client.setBufferSize(512);  // Increase from default 256 bytes to handle longer messages
   client.setCallback(mqttCallback);
   client.setKeepAlive(60);  // Increase keepalive to 60 seconds
 
-  // OTA Setup
-  ArduinoOTA.setHostname(deviceID.c_str());
-  ArduinoOTA.setPassword("josh");
-  
-  ArduinoOTA.onStart([]() {
-    String type = (ArduinoOTA.getCommand() == U_FLASH) ? "sketch" : "filesystem";
-    Serial.println("Start updating " + type);
-    strip.clear();
-    strip.show();
-  });
-  
-  ArduinoOTA.onEnd([]() {
-    Serial.println("\nEnd");
-  });
-  
-  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
-    // Show progress on first LED
-    uint8_t brightness = (progress * 255) / total;
-    strip.setPixelColor(0, strip.Color(0, 0, brightness));
-    strip.show();
-  });
-  
-  ArduinoOTA.onError([](ota_error_t error) {
-    Serial.printf("Error[%u]: ", error);
-    if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
-    else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
-    else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
-    else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
-    else if (error == OTA_END_ERROR) Serial.println("End Failed");
-  });
-  
-  ArduinoOTA.begin();
-  Serial.println("OTA Ready");
+  Serial.println("Setup complete");
 }
 
 void loop() {
-  ArduinoOTA.handle();
-
   // Check WiFi connection
   if (WiFi.status() != WL_CONNECTED) {
     if (wifiLostTimestamp == 0) {
@@ -203,7 +211,8 @@ void loop() {
       ESP.restart();
     }
 
-    blinkFirstLEDRed();
+    // Blink status LED red when WiFi disconnected
+    blinkStatusLED(255, 0, 0);
     delay(100);  // Small delay to prevent tight loop
     return;
   } else {
@@ -211,11 +220,14 @@ void loop() {
     if (wifiLostTimestamp != 0) {
       Serial.println("WiFi reconnected");
       wifiLostTimestamp = 0;
+      setStatusLED(0, 255, 255);  // Cyan for WiFi connected
     }
   }
 
   // Handle MQTT connection
   if (!client.connected()) {
+    // Blink status LED yellow when MQTT disconnected
+    blinkStatusLED(255, 255, 0);
     reconnectMQTT();
   } else {
     client.loop();
