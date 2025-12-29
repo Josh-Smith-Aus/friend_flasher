@@ -115,6 +115,27 @@ Device will download firmware from configured URL, install it, and restart autom
 - **Full OTA support** via HTTPS
 
 ### Wiring
+#### ESP01s:
+##### Boards:
+-HW-373 TP4056 Battery management board (connects to usb-c and 3.7V battery, will charge battery or let battery power circuit) - https://www.aliexpress.com/item/1005006594439600.html?spm=a2g0o.order_list.order_list_main.116.1cf918025B3GGt
+-NDO205MA 5V Boost Voltage Regulate Board (converts unstable TP4056 board output to regular 5V) - https://www.aliexpress.com/item/1005006167931077.html?spm=a2g0o.order_list.order_list_main.20.1cf918025B3GGt
+-ESP-01S WS2812 RGB LED Controller Module (Takes 5V power and distributes 3.3V to ESP01 and 5V to LEDs, also connects ESP01 GPIO2 to LED control pin) - https://www.aliexpress.com/item/1005008478902565.html?spm=a2g0o.order_list.order_list_main.26.1cf918025B3GGt
+
+```
+TP4056 B+ → Battery +
+TP4056 B- → Battery -
+TP4056 OUT+ → NDO205MA Vi
+TP4056 OUT- → NDO205MA G
+
+NDO205MA Vo → Controller Module VCC
+NDO205MA G → Controller Module GND
+
+Controller Module Red wire → LED +5V
+Controller Module Yellow Wire → LED Din
+Controller Module Black wire → LED GND
+```
+
+#### ESP32
 ```
 ESP 5V  → LED Strip 5V
 ESP GND → LED Strip GND
