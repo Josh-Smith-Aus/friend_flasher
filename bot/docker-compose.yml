@@ -1,0 +1,12 @@
+version: "3.8"
+services:
+  discord-mqtt-bot:
+    image: discord-mqtt-bot
+    container_name: discord-mqtt-bot
+    restart: unless-stopped
+    environment:
+      DISCORD_TOKEN: your_bot_token_here
+      MQTT_USERNAME: discord-bot
+      MQTT_PASSWORD: your_mqtt_password
+    volumes:
+      - ./led-map.json:/app/led-map.json:ro
