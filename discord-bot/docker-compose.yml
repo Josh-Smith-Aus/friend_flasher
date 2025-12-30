@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  discord-led-bot:
+    build: .
+    container_name: discord-led-bot
+    restart: unless-stopped
+    environment:
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - MQTT_USERNAME=${MQTT_USERNAME}
+      - MQTT_PASSWORD=${MQTT_PASSWORD}
+      - MQTT_BROKER=${MQTT_BROKER:-mqtts://ff0a9749ad4941c9b25358a360502dba.s1.eu.hivemq.cloud:8883}
+      - TZ=Australia/Melbourne
+    volumes:
+      - ./data:/data
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
