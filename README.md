@@ -325,10 +325,6 @@ Python and Node.js examples are provided in the `/bot` directory for controlling
 
 - [ ] Add web dashboard for device management
 - [ ] Implement access control lists (ACL) for MQTT topics
-- [ ] Create wiring diagrams
-- [ ] Add more complex effect patterns (fire, sparkle, etc.)
-- [ ] Implement effect scheduling/timers
-- [ ] Add support for ESP32-C3 and other variants
 - [ ] Create 3D printable enclosure designs
 
 ---
