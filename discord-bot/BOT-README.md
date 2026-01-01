@@ -7,10 +7,10 @@
    docker-compose stop
 ```
 
-2. **Run the management script**:
+2. **Run the management script(exec into container to run users script)**:
 ```bash
    cd discord-bot
-   node manage-users.js
+   docker exec -it discord-led-bot node manage-users.js
 ```
 
 3. **Select option 2** (Add/Update user)
