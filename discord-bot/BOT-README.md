@@ -1,5 +1,3 @@
----
-
 ## Discord Bot - Managing Users
 
 ### Quick Start: Adding a User
